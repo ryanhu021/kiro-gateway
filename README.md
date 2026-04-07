@@ -74,7 +74,7 @@ Made with ❤️ by [@Jwadow](https://github.com/jwadow)
 - Python 3.10+
 - One of the following:
   - [Kiro IDE](https://kiro.dev/) with logged in account, OR
-  - [Kiro CLI](https://kiro.dev/cli/) with AWS SSO (AWS IAM Identity Center, OIDC) - free Builder ID or corporate account
+  - [Kiro CLI](https://kiro.dev/cli/) with AWS SSO (AWS IAM Identity Center, OIDC) - free Builder ID, corporate account, or API key
 
 ### Installation
 
@@ -236,6 +236,19 @@ Both key formats are supported for compatibility with different kiro-cli version
 
 </details>
 
+### Option 5: Kiro API Key
+
+For headless access without interactive login:
+
+```env
+KIRO_API_KEY="ksk_..."
+
+# Password to protect YOUR proxy server
+PROXY_API_KEY="my-super-secret-password-123"
+```
+
+Generate an API key at [app.kiro.dev/account/usage](https://app.kiro.dev/account/usage). No SSO, credentials file, or interactive login required.
+
 ### Getting Credentials
 
 **For Kiro IDE users:**
@@ -245,6 +258,9 @@ Both key formats are supported for compatibility with different kiro-cli version
 **For Kiro CLI users:**
 - Log in with `kiro-cli login` and use Option 3 or Option 4 above
 - No manual token extraction needed!
+
+**For headless/remote deployment:**
+- Generate an API key at [app.kiro.dev/account/usage](https://app.kiro.dev/account/usage) and use Option 5
 
 <details>
 <summary>🔧 Advanced: Manual token extraction</summary>
