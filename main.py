@@ -61,6 +61,7 @@ from kiro.config import (
     REGION,
     KIRO_CREDS_FILE,
     KIRO_CLI_DB_FILE,
+    KIRO_API_KEY,
     PROXY_API_KEY,
     LOG_LEVEL,
     SERVER_HOST,
@@ -220,6 +221,7 @@ def validate_configuration() -> None:
     has_refresh_token = bool(REFRESH_TOKEN)
     has_creds_file = bool(KIRO_CREDS_FILE)
     has_cli_db = bool(KIRO_CLI_DB_FILE)
+    has_api_key = bool(KIRO_API_KEY)
     
     # Check if creds file actually exists
     if KIRO_CREDS_FILE:
@@ -236,7 +238,7 @@ def validate_configuration() -> None:
             logger.warning(f"KIRO_CLI_DB_FILE not found: {KIRO_CLI_DB_FILE}")
     
     # If no credentials found, show helpful error
-    if not has_refresh_token and not has_creds_file and not has_cli_db:
+    if not has_refresh_token and not has_creds_file and not has_cli_db and not has_api_key:
         if not env_file.exists():
             # No .env file and no environment variables
             errors.append(
@@ -343,6 +345,7 @@ async def lifespan(app: FastAPI):
         region=REGION,
         creds_file=KIRO_CREDS_FILE if KIRO_CREDS_FILE else None,
         sqlite_db=KIRO_CLI_DB_FILE if KIRO_CLI_DB_FILE else None,
+        api_key=KIRO_API_KEY if KIRO_API_KEY else None,
     )
     
     # Create model cache

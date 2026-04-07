@@ -124,6 +124,10 @@ VPN_PROXY_URL: str = os.getenv("VPN_PROXY_URL", "")
 # Kiro API Credentials
 # ==================================================================================================
 
+# Kiro API key for headless/programmatic access (no Midway/SSO needed)
+# Generate at https://app.kiro.dev (Account > API Keys)
+KIRO_API_KEY: str = os.getenv("KIRO_API_KEY", "")
+
 # Refresh token for updating access token
 REFRESH_TOKEN: str = os.getenv("REFRESH_TOKEN", "")
 

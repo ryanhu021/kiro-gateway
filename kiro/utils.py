@@ -61,22 +61,24 @@ def get_machine_fingerprint() -> str:
 def get_kiro_headers(auth_manager: "KiroAuthManager", token: str) -> dict:
     """
     Builds headers for Kiro API requests.
-    
+
     Includes all necessary headers for authentication and identification:
     - Authorization with Bearer token
     - User-Agent with fingerprint
     - AWS CodeWhisperer specific headers
-    
+    - tokentype header for API key authentication
+
     Args:
         auth_manager: Authentication manager for obtaining fingerprint
         token: Access token for authorization
-    
+
     Returns:
         Dictionary with headers for HTTP request
     """
+    from kiro.auth import AuthType
     fingerprint = auth_manager.fingerprint
-    
-    return {
+
+    headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
         "User-Agent": f"aws-sdk-js/1.0.34 ua/2.1 os/darwin#25.2.0 lang/js md/nodejs#22.22.0 api/codewhispererstreaming#1.0.34 m/E KiroIDE-0.11.130-{fingerprint}",
@@ -87,6 +89,11 @@ def get_kiro_headers(auth_manager: "KiroAuthManager", token: str) -> dict:
         "amz-sdk-invocation-id": str(uuid.uuid4()),
         "amz-sdk-request": "attempt=1; max=3",
     }
+
+    if auth_manager.auth_type == AuthType.API_KEY:
+        headers["tokentype"] = "API_KEY"
+
+    return headers
 
 
 def generate_completion_id() -> str:
