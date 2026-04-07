@@ -844,13 +844,16 @@ class KiroAuthManager:
     async def force_refresh(self) -> str:
         """
         Forces a token refresh.
-        
+
         Used when receiving a 403 error from the API.
-        
+        For API key auth, no refresh is possible — returns the key as-is.
+
         Returns:
             New access token
         """
         async with self._lock:
+            if self._auth_type == AuthType.API_KEY:
+                return self._access_token
             await self._refresh_token_request()
             return self._access_token
     
