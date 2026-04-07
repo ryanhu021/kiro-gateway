@@ -58,6 +58,9 @@ manual_api_test.py
 # CI/CD
 .clabot
 
+# Infrastructure
+infra/
+
 # Misc
 *.log
 .crush
