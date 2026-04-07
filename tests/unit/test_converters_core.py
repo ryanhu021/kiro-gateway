@@ -2639,8 +2639,8 @@ class TestSanitizeJsonSchema:
         result = sanitize_json_schema(schema)
         
         print(f"Result: {result}")
-        print("Checking that additionalProperties is removed...")
-        assert "additionalProperties" not in result
+        print("Checking that additionalProperties is preserved...")
+        assert result["additionalProperties"] == False
         assert result["type"] == "object"
     
     def test_removes_both_empty_required_and_additional_properties(self):
@@ -2660,10 +2660,10 @@ class TestSanitizeJsonSchema:
         result = sanitize_json_schema(schema)
         
         print(f"Result: {result}")
-        print("Checking that both fields are removed...")
+        print("Checking that both fields are handled...")
         assert "required" not in result
-        assert "additionalProperties" not in result
-        assert result == {"type": "object", "properties": {}}
+        assert result["additionalProperties"] == False
+        assert result == {"type": "object", "properties": {}, "additionalProperties": False}
     
     def test_recursively_sanitizes_nested_properties(self):
         """
@@ -2690,7 +2690,7 @@ class TestSanitizeJsonSchema:
         print("Checking nested object...")
         nested = result["properties"]["nested"]
         assert "required" not in nested
-        assert "additionalProperties" not in nested
+        assert nested["additionalProperties"] == False
     
     def test_sanitizes_items_in_lists(self):
         """
@@ -2710,7 +2710,7 @@ class TestSanitizeJsonSchema:
         
         print(f"Result: {result}")
         print("Checking anyOf elements...")
-        assert "additionalProperties" not in result["anyOf"][0]
+        assert result["anyOf"][0]["additionalProperties"] == False
         assert "required" not in result["anyOf"][1]
     
     def test_preserves_non_dict_list_items(self):
@@ -2752,7 +2752,7 @@ class TestSanitizeJsonSchema:
         
         print(f"Result: {result}")
         print("Checking result...")
-        assert "additionalProperties" not in result
+        assert result["additionalProperties"] == False
         assert result["required"] == ["question", "options"]  # Non-empty required is preserved
         assert result["properties"]["question"]["type"] == "string"
 
@@ -3479,7 +3479,7 @@ class TestConvertToolsToKiroFormat:
         print(f"Result: {result}")
         schema = result[0]["toolSpecification"]["inputSchema"]["json"]
         assert "required" not in schema
-        assert "additionalProperties" not in schema
+        assert schema["additionalProperties"] == False
 
 
 # ==================================================================================================

@@ -1169,7 +1169,7 @@ class TestToolDescriptionHandling:
         context = result["conversationState"]["currentMessage"]["userInputMessage"]["userInputMessageContext"]
         input_schema = context["tools"][0]["toolSpecification"]["inputSchema"]["json"]
         assert "required" not in input_schema
-        assert "additionalProperties" not in input_schema
+        assert input_schema["additionalProperties"] == False
     
     def test_mixed_tools_with_empty_and_normal_descriptions(self):
         """
