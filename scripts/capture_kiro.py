@@ -82,11 +82,18 @@ def response(flow: http.HTTPFlow):
     with open(f"{prefix}_res_headers.json", "w") as f:
         json.dump(headers, f, indent=2)
 
-    # Save response body (may be streaming SSE)
-    body = flow.response.get_text()
-    if body:
-        with open(f"{prefix}_res_body.txt", "w") as f:
-            f.write(body)
+    # Save response body (may be binary AWS Event Stream)
+    try:
+        body = flow.response.get_text()
+        if body:
+            with open(f"{prefix}_res_body.txt", "w") as f:
+                f.write(body)
+    except ValueError:
+        # Binary response (AWS Event Stream) - save as raw bytes
+        body = flow.response.get_content()
+        if body:
+            with open(f"{prefix}_res_body.bin", "wb") as f:
+                f.write(body)
 
-    print(f"    Response: {flow.response.status_code} ({len(body or '')} bytes)")
+    print(f"    Response: {flow.response.status_code} ({len(body or b'')} bytes)")
     print(f"    Saved to: {prefix}_res_*")
