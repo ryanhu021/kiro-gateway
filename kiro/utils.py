@@ -83,7 +83,6 @@ def get_kiro_headers(auth_manager: "KiroAuthManager", token: str) -> dict:
         "x-amz-user-agent": f"aws-sdk-js/1.0.34 KiroIDE-0.11.130-{fingerprint}",
         "x-amzn-codewhisperer-optout": "true",
         "x-amzn-kiro-agent-mode": "vibe",
-        "redirect-for-internal": "true",
         "amz-sdk-invocation-id": str(uuid.uuid4()),
         "amz-sdk-request": "attempt=1; max=3",
     }
