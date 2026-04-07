@@ -357,10 +357,10 @@ async def lifespan(app: FastAPI):
         from kiro.utils import get_kiro_headers
         from kiro.auth import AuthType
         headers = get_kiro_headers(app.state.auth_manager, token)
-        
-        # Build params - profileArn is only needed for Kiro Desktop auth
+        # ListAvailableModels doesn't use streaming-specific headers
+        headers.pop("redirect-for-internal", None)
         params = {"origin": "AI_EDITOR"}
-        if app.state.auth_manager.auth_type == AuthType.KIRO_DESKTOP and app.state.auth_manager.profile_arn:
+        if app.state.auth_manager.profile_arn:
             params["profileArn"] = app.state.auth_manager.profile_arn
         
         list_models_url = f"{app.state.auth_manager.q_host}/ListAvailableModels"

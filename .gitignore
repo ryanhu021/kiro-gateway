@@ -29,3 +29,6 @@ requests/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# MITM captures (may contain auth tokens)
+scripts/captures/

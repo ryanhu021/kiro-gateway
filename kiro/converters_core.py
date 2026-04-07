@@ -395,11 +395,7 @@ def sanitize_json_schema(schema: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         # Skip empty required arrays
         if key == "required" and isinstance(value, list) and len(value) == 0:
             continue
-        
-        # Skip additionalProperties - Kiro API doesn't support it
-        if key == "additionalProperties":
-            continue
-        
+
         # Recursively process nested objects
         if key == "properties" and isinstance(value, dict):
             result[key] = {
@@ -1505,6 +1501,7 @@ def build_kiro_payload(
         "conversationState": {
             "chatTriggerType": "MANUAL",
             "conversationId": conversation_id,
+            "agentTaskType": "vibe",
             "currentMessage": {
                 "userInputMessage": user_input_message
             }
