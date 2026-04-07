@@ -53,6 +53,8 @@ def request(flow: http.HTTPFlow):
             with open(f"{prefix}_req_body.txt", "w") as f:
                 f.write(body)
 
+    # Store prefix on flow for response correlation
+    flow.capture_prefix = prefix
     url = flow.request.url
     method = flow.request.method
     target = headers.get("x-amz-target", "unknown")
@@ -66,14 +68,8 @@ def response(flow: http.HTTPFlow):
     if "amazonaws.com" not in (flow.request.host or ""):
         return
 
-    timestamp = datetime.now().strftime("%H%M%S")
-    # Find matching request number
-    prefix = None
-    for f in sorted(os.listdir(OUTPUT_DIR), reverse=True):
-        if f.endswith("_req_headers.json"):
-            prefix = os.path.join(OUTPUT_DIR, f.replace("_req_headers.json", ""))
-            break
-
+    # Retrieve prefix stored during request()
+    prefix = getattr(flow, "capture_prefix", None)
     if not prefix:
         return
 
