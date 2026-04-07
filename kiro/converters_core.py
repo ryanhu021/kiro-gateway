@@ -1278,7 +1278,7 @@ def build_kiro_history(messages: List[UnifiedMessage], model_id: str) -> List[Di
             user_input = {
                 "content": content,
                 "modelId": model_id,
-                "origin": "KIRO_CLI",
+                "origin": "AI_EDITOR",
             }
             
             # Process images - extract from message or content

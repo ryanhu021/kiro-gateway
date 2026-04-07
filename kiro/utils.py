@@ -78,11 +78,11 @@ def get_kiro_headers(auth_manager: "KiroAuthManager", token: str) -> dict:
     
     return {
         "Authorization": f"Bearer {token}",
-        "Content-Type": "application/x-amz-json-1.0",
-        "x-amz-target": "AmazonCodeWhispererStreamingService.GenerateAssistantResponse",
-        "User-Agent": f"aws-sdk-rust/1.3.14 ua/2.1 api/codewhispererstreaming/0.1.14474 os/macos lang/rust/1.92.0 md/appVersion-1.29.5 app/AmazonQ-For-CLI",
-        "x-amz-user-agent": f"aws-sdk-rust/1.3.14 ua/2.1 api/codewhispererstreaming/0.1.14474 os/macos lang/rust/1.92.0 m/F app/AmazonQ-For-CLI",
-        "x-amzn-codewhisperer-optout": "false",
+        "Content-Type": "application/json",
+        "User-Agent": f"aws-sdk-js/1.0.34 ua/2.1 os/darwin#25.2.0 lang/js md/nodejs#22.22.0 api/codewhispererstreaming#1.0.34 m/E KiroIDE-0.11.130-{fingerprint}",
+        "x-amz-user-agent": f"aws-sdk-js/1.0.34 KiroIDE-0.11.130-{fingerprint}",
+        "x-amzn-codewhisperer-optout": "true",
+        "x-amzn-kiro-agent-mode": "vibe",
         "redirect-for-internal": "true",
         "amz-sdk-invocation-id": str(uuid.uuid4()),
         "amz-sdk-request": "attempt=1; max=3",

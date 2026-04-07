@@ -357,28 +357,20 @@ async def lifespan(app: FastAPI):
         from kiro.utils import get_kiro_headers
         from kiro.auth import AuthType
         headers = get_kiro_headers(app.state.auth_manager, token)
-        # ListAvailableModels uses a different x-amz-target than GenerateAssistantResponse
-        headers["x-amz-target"] = "AmazonCodeWhispererService.ListAvailableModels"
 
         # Build params - profileArn is only needed for Kiro Desktop auth
-        params = {"origin": "KIRO_CLI"}
+        params = {"origin": "AI_EDITOR"}
         if app.state.auth_manager.auth_type == AuthType.KIRO_DESKTOP and app.state.auth_manager.profile_arn:
             params["profileArn"] = app.state.auth_manager.profile_arn
 
         list_models_url = f"{app.state.auth_manager.q_host}/ListAvailableModels"
         logger.debug(f"Fetching models from: {list_models_url}")
 
-        # Real kiro-cli sends this as POST with query params
-        body = {"origin": "KIRO_CLI"}
-        if "profileArn" in params:
-            body["profileArn"] = params["profileArn"]
-
         async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(
+            response = await client.get(
                 list_models_url,
                 headers=headers,
-                params=params,
-                json=body
+                params=params
             )
             
             if response.status_code == 200:
