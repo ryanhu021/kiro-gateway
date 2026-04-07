@@ -28,6 +28,8 @@ Reference: https://docs.anthropic.com/en/api/messages
 import json
 from typing import Optional
 
+from typing import Optional
+
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Security, Header
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -69,32 +71,38 @@ auth_header = APIKeyHeader(name="Authorization", auto_error=False)
 async def verify_anthropic_api_key(
     x_api_key: Optional[str] = Security(anthropic_api_key_header),
     authorization: Optional[str] = Security(auth_header)
-) -> bool:
+) -> Optional[str]:
     """
     Verify API key for Anthropic API.
-    
+
     Supports two authentication methods:
     1. x-api-key header (Anthropic native)
     2. Authorization: Bearer header (for compatibility)
-    
-    Args:
-        x_api_key: Value from x-api-key header
-        authorization: Value from Authorization header
-    
+
+    If the token starts with ksk_, it's a per-user Kiro API key.
+
     Returns:
-        True if key is valid
-    
+        The ksk_ API key if provided, or None if using PROXY_API_KEY
+
     Raises:
         HTTPException: 401 if key is invalid or missing
     """
+    # Check for ksk_ keys first
+    if x_api_key and x_api_key.startswith("ksk_"):
+        return x_api_key
+    if authorization:
+        token = authorization.removeprefix("Bearer ").strip()
+        if token.startswith("ksk_"):
+            return token
+
     # Check x-api-key first (Anthropic native)
     if x_api_key and x_api_key == PROXY_API_KEY:
-        return True
-    
+        return None
+
     # Fall back to Authorization: Bearer
     if authorization and authorization == f"Bearer {PROXY_API_KEY}":
-        return True
-    
+        return None
+
     logger.warning("Access attempt with invalid API key (Anthropic endpoint)")
     raise HTTPException(
         status_code=401,
@@ -112,11 +120,12 @@ async def verify_anthropic_api_key(
 router = APIRouter(tags=["Anthropic API"])
 
 
-@router.post("/v1/messages", dependencies=[Depends(verify_anthropic_api_key)])
+@router.post("/v1/messages")
 async def messages(
     request: Request,
     request_data: AnthropicMessagesRequest,
-    anthropic_version: Optional[str] = Header(None, alias="anthropic-version")
+    anthropic_version: Optional[str] = Header(None, alias="anthropic-version"),
+    user_kiro_key: Optional[str] = Depends(verify_anthropic_api_key),
 ):
     """
     Anthropic Messages API endpoint.
@@ -292,11 +301,11 @@ async def messages(
     if request_data.stream:
         # Streaming mode: per-request client prevents orphaned connections
         # when network interface changes (VPN disconnect/reconnect)
-        http_client = KiroHttpClient(auth_manager, shared_client=None)
+        http_client = KiroHttpClient(auth_manager, shared_client=None, user_kiro_key=user_kiro_key)
     else:
         # Non-streaming mode: shared client for efficient connection reuse
         shared_client = request.app.state.http_client
-        http_client = KiroHttpClient(auth_manager, shared_client=shared_client)
+        http_client = KiroHttpClient(auth_manager, shared_client=shared_client, user_kiro_key=user_kiro_key)
     
     # Prepare data for token counting
     # Convert Pydantic models to dicts for tokenizer

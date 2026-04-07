@@ -40,8 +40,8 @@ class TestVerifyAnthropicApiKey:
         print("Action: Calling verify_anthropic_api_key...")
         result = await verify_anthropic_api_key(x_api_key=PROXY_API_KEY, authorization=None)
         
-        print(f"Comparing result: Expected True, Got {result}")
-        assert result is True
+        print(f"Comparing result: Expected None, Got {result}")
+        assert result is None
     
     @pytest.mark.asyncio
     async def test_valid_bearer_token_returns_true(self):
@@ -55,8 +55,8 @@ class TestVerifyAnthropicApiKey:
         print("Action: Calling verify_anthropic_api_key...")
         result = await verify_anthropic_api_key(x_api_key=None, authorization=valid_auth)
         
-        print(f"Comparing result: Expected True, Got {result}")
-        assert result is True
+        print(f"Comparing result: Expected None, Got {result}")
+        assert result is None
     
     @pytest.mark.asyncio
     async def test_x_api_key_takes_precedence(self):
@@ -72,8 +72,8 @@ class TestVerifyAnthropicApiKey:
             authorization="Bearer wrong_key"
         )
         
-        print(f"Comparing result: Expected True, Got {result}")
-        assert result is True
+        print(f"Comparing result: Expected None, Got {result}")
+        assert result is None
     
     @pytest.mark.asyncio
     async def test_invalid_x_api_key_raises_401(self):

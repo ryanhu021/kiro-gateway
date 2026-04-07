@@ -78,21 +78,25 @@ class KiroHttpClient:
     def __init__(
         self,
         auth_manager: KiroAuthManager,
-        shared_client: Optional[httpx.AsyncClient] = None
+        shared_client: Optional[httpx.AsyncClient] = None,
+        user_kiro_key: Optional[str] = None,
     ):
         """
         Initializes the HTTP client.
-        
+
         Args:
             auth_manager: Authentication manager
             shared_client: Optional shared httpx.AsyncClient for connection pooling.
                           If provided, this client will be used instead of creating
                           a new one. The shared client will NOT be closed by close().
+            user_kiro_key: Optional per-user Kiro API key (ksk_...) passed through
+                          from the client request. Overrides auth_manager token.
         """
         self.auth_manager = auth_manager
         self._shared_client = shared_client
         self._owns_client = shared_client is None
         self.client: Optional[httpx.AsyncClient] = shared_client
+        self._user_kiro_key = user_kiro_key
     
     async def _get_client(self, stream: bool = False) -> httpx.AsyncClient:
         """
@@ -208,8 +212,13 @@ class KiroHttpClient:
         for attempt in range(max_retries):
             try:
                 # Get current token
-                token = await self.auth_manager.get_access_token()
-                headers = get_kiro_headers(self.auth_manager, token)
+                if self._user_kiro_key:
+                    token = self._user_kiro_key
+                    headers = get_kiro_headers(self.auth_manager, token)
+                    headers["tokentype"] = "API_KEY"
+                else:
+                    token = await self.auth_manager.get_access_token()
+                    headers = get_kiro_headers(self.auth_manager, token)
                 
                 if stream:
                     # Prevent CLOSE_WAIT connection leak (issue #38)
@@ -225,8 +234,10 @@ class KiroHttpClient:
                 if response.status_code == 200:
                     return response
                 
-                # 403 - token expired, refresh and retry
+                # 403 - token expired, refresh and retry (skip for per-user API keys)
                 if response.status_code == 403:
+                    if self._user_kiro_key:
+                        return response
                     logger.warning(f"Received 403, refreshing token (attempt {attempt + 1}/{MAX_RETRIES})")
                     await self.auth_manager.force_refresh()
                     continue

@@ -29,6 +29,8 @@ Contains all API endpoints:
 import json
 from datetime import datetime, timezone
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Security
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import APIKeyHeader
@@ -62,25 +64,34 @@ except ImportError:
 api_key_header = APIKeyHeader(name="Authorization", auto_error=False)
 
 
-async def verify_api_key(auth_header: str = Security(api_key_header)) -> bool:
+async def verify_api_key(auth_header: str = Security(api_key_header)) -> Optional[str]:
     """
     Verify API key in Authorization header.
-    
-    Expects format: "Bearer {PROXY_API_KEY}"
-    
-    Args:
-        auth_header: Authorization header value
-    
+
+    Expects format: "Bearer {PROXY_API_KEY}" or "Bearer ksk_..."
+
+    If the token starts with ksk_, it's a per-user Kiro API key passed through
+    directly to the Kiro API. Otherwise, validates against PROXY_API_KEY.
+
     Returns:
-        True if key is valid
-    
+        The ksk_ API key if provided, or None if using PROXY_API_KEY
+
     Raises:
         HTTPException: 401 if key is invalid or missing
     """
-    if not auth_header or auth_header != f"Bearer {PROXY_API_KEY}":
-        logger.warning("Access attempt with invalid API key.")
+    if not auth_header:
         raise HTTPException(status_code=401, detail="Invalid or missing API Key")
-    return True
+
+    token = auth_header.removeprefix("Bearer ").strip()
+
+    if token.startswith("ksk_"):
+        return token
+
+    if auth_header == f"Bearer {PROXY_API_KEY}":
+        return None
+
+    logger.warning("Access attempt with invalid API key.")
+    raise HTTPException(status_code=401, detail="Invalid or missing API Key")
 
 
 # --- Router ---
@@ -116,8 +127,8 @@ async def health():
         "version": APP_VERSION
     }
 
-@router.get("/v1/models", response_model=ModelList, dependencies=[Depends(verify_api_key)])
-async def get_models(request: Request):
+@router.get("/v1/models", response_model=ModelList)
+async def get_models(request: Request, _: Optional[str] = Depends(verify_api_key)):
     """
     Return list of available models.
     
@@ -150,8 +161,8 @@ async def get_models(request: Request):
     return ModelList(data=openai_models)
 
 
-@router.post("/v1/chat/completions", dependencies=[Depends(verify_api_key)])
-async def chat_completions(request: Request, request_data: ChatCompletionRequest):
+@router.post("/v1/chat/completions")
+async def chat_completions(request: Request, request_data: ChatCompletionRequest, user_kiro_key: Optional[str] = Depends(verify_api_key)):
     """
     Chat completions endpoint - compatible with OpenAI API.
     
@@ -265,11 +276,11 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
     if request_data.stream:
         # Streaming mode: per-request client prevents orphaned connections
         # when network interface changes (VPN disconnect/reconnect)
-        http_client = KiroHttpClient(auth_manager, shared_client=None)
+        http_client = KiroHttpClient(auth_manager, shared_client=None, user_kiro_key=user_kiro_key)
     else:
         # Non-streaming mode: shared client for efficient connection reuse
         shared_client = request.app.state.http_client
-        http_client = KiroHttpClient(auth_manager, shared_client=shared_client)
+        http_client = KiroHttpClient(auth_manager, shared_client=shared_client, user_kiro_key=user_kiro_key)
     try:
         # Make request to Kiro API (for both streaming and non-streaming modes)
         # Important: we wait for Kiro response BEFORE returning StreamingResponse,

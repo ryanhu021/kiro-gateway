@@ -44,8 +44,8 @@ class TestVerifyApiKey:
         print("Action: Calling verify_api_key...")
         result = await verify_api_key(valid_header)
         
-        print(f"Comparing result: Expected True, Got {result}")
-        assert result is True
+        print(f"Comparing result: Expected None, Got {result}")
+        assert result is None
     
     @pytest.mark.asyncio
     async def test_invalid_api_key_raises_401(self):
