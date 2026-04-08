@@ -81,6 +81,12 @@ export class KiroGatewayStack extends cdk.Stack {
       unhealthyThresholdCount: 3,
     });
 
+    // Increase ALB idle timeout for long-running LLM requests (default 60s)
+    service.loadBalancer.setAttribute(
+      "idle_timeout.timeout_seconds",
+      "600"
+    );
+
     // Outputs
     new cdk.CfnOutput(this, "LoadBalancerDNS", {
       value: service.loadBalancer.loadBalancerDnsName,
