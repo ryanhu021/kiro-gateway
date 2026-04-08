@@ -87,12 +87,19 @@ from kiro.debug_middleware import DebugLoggerMiddleware
 
 # --- Loguru Configuration ---
 logger.remove()
-logger.add(
-    sys.stderr,
-    level=LOG_LEVEL,
-    colorize=True,
-    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
-)
+
+# Auto-detect ECS environment for structured JSON logging (CloudWatch-friendly)
+_running_in_ecs = bool(os.environ.get("ECS_CONTAINER_METADATA_URI_V4") or os.environ.get("ECS_CONTAINER_METADATA_URI"))
+
+if _running_in_ecs:
+    logger.add(sys.stderr, level=LOG_LEVEL, serialize=True)
+else:
+    logger.add(
+        sys.stderr,
+        level=LOG_LEVEL,
+        colorize=True,
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+    )
 
 
 class InterceptHandler(logging.Handler):
