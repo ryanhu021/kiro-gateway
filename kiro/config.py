@@ -449,15 +449,16 @@ FAKE_REASONING_INITIAL_BUFFER_SIZE: int = int(os.getenv("FAKE_REASONING_INITIAL_
 # Default 600KB provides safety margin below the ~615KB hard limit
 KIRO_MAX_PAYLOAD_BYTES: int = int(os.getenv("KIRO_MAX_PAYLOAD_BYTES", "600000"))
 
-# Auto-trim payload when over limit (default: true)
+# Auto-trim payload when over limit (default: false - disabled)
+# Enable this if you use many tools (30+) and hit "Improperly formed request" errors
 # When false, returns a clear error instead of trimming
-AUTO_TRIM_PAYLOAD: bool = os.getenv("AUTO_TRIM_PAYLOAD", "true").lower() in ("true", "1", "yes")
+AUTO_TRIM_PAYLOAD: bool = os.getenv("AUTO_TRIM_PAYLOAD", "false").lower() in ("true", "1", "yes")
 
 # ==================================================================================================
 # Application Version
 # ==================================================================================================
 
-APP_VERSION: str = "2.3"
+APP_VERSION: str = "2.3-dev"
 APP_TITLE: str = "Kiro Gateway"
 APP_DESCRIPTION: str = "Proxy gateway for Kiro API (Amazon Q Developer / AWS CodeWhisperer). OpenAI and Anthropic compatible. Made by @jwadow"
 
