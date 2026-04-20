@@ -27,6 +27,7 @@ Contains all API endpoints:
 """
 
 import json
+import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Security
@@ -50,6 +51,7 @@ from kiro.converters_openai import build_kiro_payload
 from kiro.streaming_openai import stream_kiro_to_openai, collect_stream_response, stream_with_first_token_retry
 from kiro.http_client import KiroHttpClient
 from kiro.utils import generate_conversation_id
+from kiro.metrics import metrics, RequestMetricsContext
 
 # Import debug_logger
 try:
@@ -85,6 +87,22 @@ async def verify_api_key(auth_header: str = Security(api_key_header)) -> bool:
 
 # --- Router ---
 router = APIRouter()
+
+
+def _emit_kiro_metrics(ctx: RequestMetricsContext, http_client: KiroHttpClient, dims: dict) -> None:
+    """Emit KiroDuration, FirstTokenLatency, token counts, and RetryCount from request context."""
+    if ctx.kiro_request_start:
+        metrics.record_duration("KiroDuration", ctx.kiro_request_start, dims)
+    if ctx.first_token_time and ctx.kiro_request_start:
+        ttft_ms = (ctx.first_token_time - ctx.kiro_request_start) * 1000
+        metrics.put("FirstTokenLatency", ttft_ms, "Milliseconds", dims)
+    if ctx.input_tokens > 0:
+        metrics.record_count("InputTokens", ctx.input_tokens, dims)
+    if ctx.output_tokens > 0:
+        metrics.record_count("OutputTokens", ctx.output_tokens, dims)
+    retry_count = getattr(http_client, "retry_count", 0) or 0
+    if isinstance(retry_count, int) and retry_count > 0:
+        metrics.record_count("RetryCount", retry_count, dims)
 
 
 @router.get("/")
@@ -170,7 +188,10 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
         HTTPException: On validation or API errors
     """
     logger.info(f"Request to /v1/chat/completions (model={request_data.model}, stream={request_data.stream})")
-    
+
+    request_start = time.time()
+    dims = {"api_format": "openai", "model": request_data.model}
+
     auth_manager: KiroAuthManager = request.app.state.auth_manager
     model_cache: ModelInfoCache = request.app.state.model_cache
     
@@ -270,10 +291,14 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
         # Non-streaming mode: shared client for efficient connection reuse
         shared_client = request.app.state.http_client
         http_client = KiroHttpClient(auth_manager, shared_client=shared_client)
+
+    metrics_ctx = RequestMetricsContext()
+
     try:
         # Make request to Kiro API (for both streaming and non-streaming modes)
         # Important: we wait for Kiro response BEFORE returning StreamingResponse,
         # so that 200 OK means Kiro accepted the request and started responding
+        metrics_ctx.kiro_request_start = time.time()
         response = await http_client.request_with_retry(
             "POST",
             url,
@@ -307,7 +332,14 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
             logger.warning(
                 f"HTTP {response.status_code} - POST /v1/chat/completions - {error_message[:100]}"
             )
-            
+
+            # Emit metrics for upstream error
+            metrics.record_count("RequestCount", 1, {**dims, "status_code": str(response.status_code)})
+            metrics.record_count("ErrorCount", 1, {**dims, "error_type": "kiro_api_error"})
+            metrics.record_duration("Duration", request_start, dims)
+            if http_client.retry_count > 0:
+                metrics.record_count("RetryCount", http_client.retry_count, dims)
+
             # Flush debug logs on error ("errors" mode)
             if debug_logger:
                 debug_logger.flush_on_error(response.status_code, error_message)
@@ -342,7 +374,8 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                         model_cache,
                         auth_manager,
                         request_messages=messages_for_tokenizer,
-                        request_tools=tools_for_tokenizer
+                        request_tools=tools_for_tokenizer,
+                        metrics_ctx=metrics_ctx,
                     ):
                         yield chunk
                 except GeneratorExit:
@@ -360,15 +393,21 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                     raise
                 finally:
                     await http_client.close()
-                    # Log access log for streaming (success or error)
+                    # Emit metrics
+                    status = "500" if streaming_error else "200"
+                    metrics.record_count("RequestCount", 1, {**dims, "status_code": status})
+                    metrics.record_duration("Duration", request_start, dims)
                     if streaming_error:
                         error_type = type(streaming_error).__name__
+                        metrics.record_count("ErrorCount", 1, {**dims, "error_type": error_type})
                         error_msg = str(streaming_error) if str(streaming_error) else "(empty message)"
                         logger.error(f"HTTP 500 - POST /v1/chat/completions (streaming) - [{error_type}] {error_msg[:100]}")
                     elif client_disconnected:
                         logger.info(f"HTTP 200 - POST /v1/chat/completions (streaming) - client disconnected")
                     else:
                         logger.info(f"HTTP 200 - POST /v1/chat/completions (streaming) - completed")
+                    # Emit Kiro-specific metrics
+                    _emit_kiro_metrics(metrics_ctx, http_client, dims)
                     # Write debug logs AFTER streaming completes
                     if debug_logger:
                         if streaming_error:
@@ -388,11 +427,17 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                 model_cache,
                 auth_manager,
                 request_messages=messages_for_tokenizer,
-                request_tools=tools_for_tokenizer
+                request_tools=tools_for_tokenizer,
+                metrics_ctx=metrics_ctx,
             )
-            
+
             await http_client.close()
-            
+
+            # Emit metrics for non-streaming success
+            metrics.record_count("RequestCount", 1, {**dims, "status_code": "200"})
+            metrics.record_duration("Duration", request_start, dims)
+            _emit_kiro_metrics(metrics_ctx, http_client, dims)
+
             # Log access log for non-streaming success
             logger.info(f"HTTP 200 - POST /v1/chat/completions (non-streaming) - completed")
             
@@ -404,6 +449,10 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
     
     except HTTPException as e:
         await http_client.close()
+        # Emit metrics for HTTP error
+        metrics.record_count("RequestCount", 1, {**dims, "status_code": str(e.status_code)})
+        metrics.record_count("ErrorCount", 1, {**dims, "error_type": "http_exception"})
+        metrics.record_duration("Duration", request_start, dims)
         # Log access log for HTTP error
         logger.error(f"HTTP {e.status_code} - POST /v1/chat/completions - {e.detail}")
         # Flush debug logs on HTTP error ("errors" mode)
@@ -412,6 +461,10 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
         raise
     except Exception as e:
         await http_client.close()
+        # Emit metrics for internal error
+        metrics.record_count("RequestCount", 1, {**dims, "status_code": "500"})
+        metrics.record_count("ErrorCount", 1, {**dims, "error_type": type(e).__name__})
+        metrics.record_duration("Duration", request_start, dims)
         logger.error(f"Internal error: {e}", exc_info=True)
         # Log access log for internal error
         logger.error(f"HTTP 500 - POST /v1/chat/completions - {str(e)[:100]}")

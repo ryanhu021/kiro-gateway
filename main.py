@@ -83,6 +83,7 @@ from kiro.routes_openai import router as openai_router
 from kiro.routes_anthropic import router as anthropic_router
 from kiro.exceptions import validation_exception_handler
 from kiro.debug_middleware import DebugLoggerMiddleware
+from kiro.metrics import metrics
 
 
 # --- Loguru Configuration ---
@@ -321,7 +322,11 @@ async def lifespan(app: FastAPI):
     concurrent requests efficiently (fixes issue #24).
     """
     logger.info("Starting application... Creating state managers.")
-    
+
+    # Start CloudWatch metrics client (no-op if CLOUDWATCH_METRICS_ENABLED is not set)
+    await metrics.start()
+    app.state.metrics = metrics
+
     # Create shared HTTP client with connection pooling
     # This reduces memory usage and enables connection reuse across requests
     # Limits: max 100 total connections, max 20 keep-alive connections
@@ -430,6 +435,7 @@ async def lifespan(app: FastAPI):
     
     # Graceful shutdown
     logger.info("Shutting down application...")
+    await metrics.stop()
     try:
         await app.state.http_client.aclose()
         logger.info("Shared HTTP client closed")

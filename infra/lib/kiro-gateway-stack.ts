@@ -4,6 +4,8 @@ import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as ecs_patterns from "aws-cdk-lib/aws-ecs-patterns";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as logs from "aws-cdk-lib/aws-logs";
+import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
+import * as iam from "aws-cdk-lib/aws-iam";
 import { Construct } from "constructs";
 import * as path from "path";
 
@@ -50,6 +52,7 @@ export class KiroGatewayStack extends cdk.Stack {
             SERVER_HOST: "0.0.0.0",
             SERVER_PORT: "8000",
             LOG_LEVEL: "INFO",
+            CLOUDWATCH_METRICS_ENABLED: "true",
           },
           secrets: {
             KIRO_API_KEY: ecs.Secret.fromSecretsManager(kiroApiKeySecret),
@@ -86,6 +89,122 @@ export class KiroGatewayStack extends cdk.Stack {
       "idle_timeout.timeout_seconds",
       "600"
     );
+
+    // Grant CloudWatch PutMetricData to the task role
+    service.taskDefinition.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["cloudwatch:PutMetricData"],
+        resources: ["*"],
+      })
+    );
+
+    // ---------------------------------------------------------------
+    // CloudWatch Dashboard
+    // ---------------------------------------------------------------
+    const metricsNamespace = "KiroGateway";
+
+    const dashboard = new cloudwatch.Dashboard(this, "Dashboard", {
+      dashboardName: "KiroGateway",
+      defaultInterval: cdk.Duration.hours(3),
+    });
+
+    // Use raw CloudFormation to define SEARCH-based widgets
+    const cfnDashboard = dashboard.node.defaultChild as cloudwatch.CfnDashboard;
+    cfnDashboard.addPropertyOverride("DashboardBody", JSON.stringify({
+      widgets: [
+        // Row 1: Request volume & errors
+        {
+          type: "metric", x: 0, y: 0, width: 8, height: 6,
+          properties: {
+            title: "Request Count",
+            metrics: [
+              [{ expression: `SEARCH('{${metricsNamespace},api_format,model,status_code} MetricName="RequestCount"', 'Sum', 60)`, id: "e1" }],
+            ],
+            view: "timeSeries", stacked: false, region: cdk.Aws.REGION, period: 60,
+          },
+        },
+        {
+          type: "metric", x: 8, y: 0, width: 8, height: 6,
+          properties: {
+            title: "Error Count",
+            metrics: [
+              [{ expression: `SEARCH('{${metricsNamespace},api_format,model,error_type} MetricName="ErrorCount"', 'Sum', 60)`, id: "e1" }],
+            ],
+            view: "timeSeries", stacked: false, region: cdk.Aws.REGION, period: 60,
+          },
+        },
+        {
+          type: "metric", x: 16, y: 0, width: 8, height: 6,
+          properties: {
+            title: "Retry Count",
+            metrics: [
+              [{ expression: `SEARCH('{${metricsNamespace},api_format,model} MetricName="RetryCount"', 'Sum', 60)`, id: "e1" }],
+            ],
+            view: "timeSeries", stacked: false, region: cdk.Aws.REGION, period: 60,
+          },
+        },
+        // Row 2: Latency
+        {
+          type: "metric", x: 0, y: 6, width: 8, height: 6,
+          properties: {
+            title: "Duration (ms) — p50 / p90 / p99",
+            metrics: [
+              [{ expression: `SEARCH('{${metricsNamespace},api_format,model} MetricName="Duration"', 'p50', 60)`, id: "e1", label: "p50" }],
+              [{ expression: `SEARCH('{${metricsNamespace},api_format,model} MetricName="Duration"', 'p90', 60)`, id: "e2", label: "p90" }],
+              [{ expression: `SEARCH('{${metricsNamespace},api_format,model} MetricName="Duration"', 'p99', 60)`, id: "e3", label: "p99" }],
+            ],
+            view: "timeSeries", stacked: false, region: cdk.Aws.REGION, period: 60,
+          },
+        },
+        {
+          type: "metric", x: 8, y: 6, width: 8, height: 6,
+          properties: {
+            title: "Kiro Upstream Duration (ms) — p50 / p90 / p99",
+            metrics: [
+              [{ expression: `SEARCH('{${metricsNamespace},api_format,model} MetricName="KiroDuration"', 'p50', 60)`, id: "e1", label: "p50" }],
+              [{ expression: `SEARCH('{${metricsNamespace},api_format,model} MetricName="KiroDuration"', 'p90', 60)`, id: "e2", label: "p90" }],
+              [{ expression: `SEARCH('{${metricsNamespace},api_format,model} MetricName="KiroDuration"', 'p99', 60)`, id: "e3", label: "p99" }],
+            ],
+            view: "timeSeries", stacked: false, region: cdk.Aws.REGION, period: 60,
+          },
+        },
+        {
+          type: "metric", x: 16, y: 6, width: 8, height: 6,
+          properties: {
+            title: "First Token Latency (ms) — p50 / p90 / p99",
+            metrics: [
+              [{ expression: `SEARCH('{${metricsNamespace},api_format,model} MetricName="FirstTokenLatency"', 'p50', 60)`, id: "e1", label: "p50" }],
+              [{ expression: `SEARCH('{${metricsNamespace},api_format,model} MetricName="FirstTokenLatency"', 'p90', 60)`, id: "e2", label: "p90" }],
+              [{ expression: `SEARCH('{${metricsNamespace},api_format,model} MetricName="FirstTokenLatency"', 'p99', 60)`, id: "e3", label: "p99" }],
+            ],
+            view: "timeSeries", stacked: false, region: cdk.Aws.REGION, period: 60,
+          },
+        },
+        // Row 3: Tokens
+        {
+          type: "metric", x: 0, y: 12, width: 12, height: 6,
+          properties: {
+            title: "Input Tokens",
+            metrics: [
+              [{ expression: `SEARCH('{${metricsNamespace},api_format,model} MetricName="InputTokens"', 'Sum', 60)`, id: "e1", label: "Sum" }],
+              [{ expression: `SEARCH('{${metricsNamespace},api_format,model} MetricName="InputTokens"', 'Average', 60)`, id: "e2", label: "Avg" }],
+            ],
+            view: "timeSeries", stacked: false, region: cdk.Aws.REGION, period: 60,
+          },
+        },
+        {
+          type: "metric", x: 12, y: 12, width: 12, height: 6,
+          properties: {
+            title: "Output Tokens",
+            metrics: [
+              [{ expression: `SEARCH('{${metricsNamespace},api_format,model} MetricName="OutputTokens"', 'Sum', 60)`, id: "e1", label: "Sum" }],
+              [{ expression: `SEARCH('{${metricsNamespace},api_format,model} MetricName="OutputTokens"', 'Average', 60)`, id: "e2", label: "Avg" }],
+            ],
+            view: "timeSeries", stacked: false, region: cdk.Aws.REGION, period: 60,
+          },
+        },
+      ],
+    }));
 
     // Outputs
     new cdk.CfnOutput(this, "LoadBalancerDNS", {

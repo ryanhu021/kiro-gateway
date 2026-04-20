@@ -93,6 +93,7 @@ class KiroHttpClient:
         self._shared_client = shared_client
         self._owns_client = shared_client is None
         self.client: Optional[httpx.AsyncClient] = shared_client
+        self.retry_count: int = 0
     
     async def _get_client(self, stream: bool = False) -> httpx.AsyncClient:
         """
@@ -210,7 +211,7 @@ class KiroHttpClient:
                 # Get current token
                 token = await self.auth_manager.get_access_token()
                 headers = get_kiro_headers(self.auth_manager, token)
-                
+
                 if stream:
                     # Prevent CLOSE_WAIT connection leak (issue #38)
                     headers["Connection"] = "close"
@@ -220,26 +221,29 @@ class KiroHttpClient:
                 else:
                     logger.debug("Sending request to Kiro API...")
                     response = await client.request(method, url, json=json_data, headers=headers)
-                
+
                 # Check status
                 if response.status_code == 200:
                     return response
-                
+
                 # 403 - token expired, refresh and retry
                 if response.status_code == 403:
+                    self.retry_count += 1
                     logger.warning(f"Received 403, refreshing token (attempt {attempt + 1}/{MAX_RETRIES})")
                     await self.auth_manager.force_refresh()
                     continue
-                
+
                 # 429 - rate limit, wait and retry
                 if response.status_code == 429:
+                    self.retry_count += 1
                     delay = BASE_RETRY_DELAY * (2 ** attempt)
                     logger.warning(f"Received 429, waiting {delay}s (attempt {attempt + 1}/{MAX_RETRIES})")
                     await asyncio.sleep(delay)
                     continue
-                
+
                 # 5xx - server error, wait and retry
                 if 500 <= response.status_code < 600:
+                    self.retry_count += 1
                     delay = BASE_RETRY_DELAY * (2 ** attempt)
                     logger.warning(f"Received {response.status_code}, waiting {delay}s (attempt {attempt + 1}/{MAX_RETRIES})")
                     await asyncio.sleep(delay)

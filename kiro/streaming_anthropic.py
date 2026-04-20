@@ -47,6 +47,7 @@ from kiro.streaming_core import (
     calculate_tokens_from_context_usage,
     stream_with_first_token_retry,
 )
+from kiro.metrics import RequestMetricsContext
 from kiro.tokenizer import count_tokens, count_message_tokens, count_tools_tokens
 from kiro.parsers import parse_bracket_tool_calls, deduplicate_tool_calls
 from kiro.config import FIRST_TOKEN_TIMEOUT, FIRST_TOKEN_MAX_RETRIES, FAKE_REASONING_HANDLING
@@ -105,7 +106,8 @@ async def stream_kiro_to_anthropic(
     auth_manager: "KiroAuthManager",
     first_token_timeout: float = FIRST_TOKEN_TIMEOUT,
     request_messages: Optional[list] = None,
-    conversation_id: Optional[str] = None
+    conversation_id: Optional[str] = None,
+    metrics_ctx: Optional[RequestMetricsContext] = None,
 ) -> AsyncGenerator[str, None]:
     """
     Generator for converting Kiro stream to Anthropic SSE format.
@@ -175,7 +177,7 @@ async def stream_kiro_to_anthropic(
             }
         })
         
-        async for event in parse_kiro_stream(response, first_token_timeout):
+        async for event in parse_kiro_stream(response, first_token_timeout, metrics_ctx=metrics_ctx):
             if event.type == "content":
                 content = event.content or ""
                 full_content += content
@@ -466,7 +468,12 @@ async def stream_kiro_to_anthropic(
         
         # Determine stop reason
         stop_reason = "tool_use" if tool_blocks else "end_turn"
-        
+
+        # Populate metrics context with token counts
+        if metrics_ctx:
+            metrics_ctx.input_tokens = input_tokens
+            metrics_ctx.output_tokens = output_tokens
+
         # Send message_delta with stop_reason and usage
         yield format_sse_event("message_delta", {
             "type": "message_delta",
@@ -545,7 +552,8 @@ async def collect_anthropic_response(
     model: str,
     model_cache: "ModelInfoCache",
     auth_manager: "KiroAuthManager",
-    request_messages: Optional[list] = None
+    request_messages: Optional[list] = None,
+    metrics_ctx: Optional[RequestMetricsContext] = None,
 ) -> dict:
     """
     Collect full response from Kiro stream in Anthropic format.
@@ -570,7 +578,7 @@ async def collect_anthropic_response(
         input_tokens = count_message_tokens(request_messages, apply_claude_correction=False)
     
     # Collect stream result
-    result = await collect_stream_to_result(response)
+    result = await collect_stream_to_result(response, metrics_ctx=metrics_ctx)
     
     # Build content blocks
     content_blocks = []
@@ -626,7 +634,12 @@ async def collect_anthropic_response(
     
     # Determine stop reason
     stop_reason = "tool_use" if result.tool_calls else "end_turn"
-    
+
+    # Populate metrics context with token counts
+    if metrics_ctx:
+        metrics_ctx.input_tokens = input_tokens
+        metrics_ctx.output_tokens = output_tokens
+
     logger.debug(
         f"[Anthropic Non-Streaming] Completed: "
         f"input_tokens={input_tokens}, output_tokens={output_tokens}, "
