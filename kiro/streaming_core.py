@@ -184,8 +184,11 @@ async def parse_kiro_stream(
         async for chunk in byte_iterator:
             if debug_logger:
                 debug_logger.log_raw_chunk(chunk)
-            
+
             async for event in _process_chunk(parser, chunk, thinking_parser):
+                if metrics_ctx and metrics_ctx.first_token_time is None:
+                    if event.type == "content" or event.type == "thinking":
+                        metrics_ctx.first_token_time = time.time()
                 yield event
         
         # Finalize thinking parser and yield any remaining content

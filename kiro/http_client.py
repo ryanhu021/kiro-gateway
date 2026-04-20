@@ -254,7 +254,8 @@ class KiroHttpClient:
                 
             except httpx.TimeoutException as e:
                 last_error = e
-                
+                self.retry_count += 1
+
                 # Classify timeout error for user-friendly messaging
                 error_info = classify_network_error(e)
                 last_error_info = error_info
@@ -273,7 +274,8 @@ class KiroHttpClient:
                 
             except httpx.RequestError as e:
                 last_error = e
-                
+                self.retry_count += 1
+
                 # Classify the error for user-friendly messaging
                 error_info = classify_network_error(e)
                 last_error_info = error_info
