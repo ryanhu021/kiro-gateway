@@ -146,13 +146,18 @@ async def call_kiro_mcp_api(
     
     try:
         token = await auth_manager.get_access_token()
-        
+
         # EXACT headers from architecture
         headers = {
             "Authorization": f"Bearer {token}",
             "x-amzn-codewhisperer-optout": "false",
             "Content-Type": "application/json"
         }
+
+        # API key auth requires tokentype header
+        from kiro.auth import AuthType
+        if auth_manager.auth_type == AuthType.API_KEY:
+            headers["tokentype"] = "API_KEY"
         
         mcp_url = f"{auth_manager.q_host}/mcp"
         logger.debug(f"Calling MCP API: {mcp_url}")

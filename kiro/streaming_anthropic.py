@@ -553,13 +553,39 @@ async def stream_kiro_to_anthropic(
                 tool_id = tc.get("id") or f"toolu_{uuid.uuid4().hex[:24]}"
                 tool_name = tc.get("function", {}).get("name", "")
                 tool_input = tc.get("function", {}).get("arguments", {})
-                
+
                 if isinstance(tool_input, str):
                     try:
                         tool_input = json.loads(tool_input)
                     except json.JSONDecodeError:
                         tool_input = {}
-                
+
+                # Intercept web_search bracket-style tool calls (Path B - MCP emulation)
+                from kiro.config import WEB_SEARCH_ENABLED
+                if WEB_SEARCH_ENABLED and tool_name == "web_search":
+                    from kiro.mcp_tools import call_kiro_mcp_api, generate_search_summary
+                    logger.info("Intercepted web_search tool call (Path B - bracket-style)")
+                    query = tool_input.get("query", "")
+                    if query:
+                        mcp_tool_use_id, results = await call_kiro_mcp_api(query, auth_manager)
+                        if results is not None:
+                            summary = generate_search_summary(query, results)
+                            if not text_block_started:
+                                text_block_index = current_block_index
+                                yield format_sse_event("content_block_start", {
+                                    "type": "content_block_start",
+                                    "index": text_block_index,
+                                    "content_block": {"type": "text", "text": ""}
+                                })
+                                text_block_started = True
+                            yield format_sse_event("content_block_delta", {
+                                "type": "content_block_delta",
+                                "index": text_block_index,
+                                "delta": {"type": "text_delta", "text": summary}
+                            })
+                            full_content += summary
+                            continue
+
                 yield format_sse_event("content_block_start", {
                     "type": "content_block_start",
                     "index": current_block_index,
