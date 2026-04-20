@@ -61,6 +61,9 @@ manual_api_test.py
 # Infrastructure
 infra/
 
+# Cache (e.g. trivy.db from security scans)
+.cache/
+
 # Misc
 *.log
 .crush
