@@ -41,6 +41,23 @@ class RequestMetricsContext:
     retry_count: int = 0
 
 
+def emit_kiro_metrics(ctx: RequestMetricsContext, retry_count: int, dims: Dict[str, str]) -> None:
+    """Emit KiroDuration, FirstTokenLatency, token counts, and RetryCount from request context."""
+    if ctx.kiro_request_start:
+        end = ctx.kiro_request_end or time.time()
+        kiro_ms = (end - ctx.kiro_request_start) * 1000
+        metrics.put("KiroDuration", kiro_ms, "Milliseconds", dims)
+    if ctx.first_token_time and ctx.kiro_request_start:
+        ttft_ms = (ctx.first_token_time - ctx.kiro_request_start) * 1000
+        metrics.put("FirstTokenLatency", ttft_ms, "Milliseconds", dims)
+    if ctx.input_tokens > 0:
+        metrics.record_count("InputTokens", ctx.input_tokens, dims)
+    if ctx.output_tokens > 0:
+        metrics.record_count("OutputTokens", ctx.output_tokens, dims)
+    if isinstance(retry_count, int) and retry_count > 0:
+        metrics.record_count("RetryCount", retry_count, dims)
+
+
 @dataclass(frozen=True)
 class MetricDatum:
     """Single metric data point ready for CloudWatch."""
@@ -121,6 +138,8 @@ class MetricsClient:
         """
         if not self._enabled:
             return
+        if len(self._buffer) >= self._buffer.maxlen:
+            logger.warning(f"Metrics buffer full ({self._buffer.maxlen}), oldest metrics will be dropped")
         self._buffer.append(MetricDatum(
             name=name,
             value=value,
@@ -173,7 +192,7 @@ class MetricsClient:
             batch = items[i : i + 25]
             metric_data = [self._to_cw(d) for d in batch]
             try:
-                await asyncio.get_event_loop().run_in_executor(
+                await asyncio.get_running_loop().run_in_executor(
                     None,
                     lambda md=metric_data: self._cw_client.put_metric_data(
                         Namespace=NAMESPACE,

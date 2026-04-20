@@ -52,7 +52,7 @@ from kiro.streaming_anthropic import (
 from kiro.http_client import KiroHttpClient
 from kiro.utils import generate_conversation_id
 from kiro.tokenizer import count_tools_tokens
-from kiro.metrics import metrics, RequestMetricsContext
+from kiro.metrics import metrics, RequestMetricsContext, emit_kiro_metrics
 
 # Import debug_logger
 try:
@@ -114,20 +114,8 @@ async def verify_anthropic_api_key(
 router = APIRouter(tags=["Anthropic API"])
 
 
-def _emit_kiro_metrics(ctx: RequestMetricsContext, http_client: KiroHttpClient, dims: dict) -> None:
-    """Emit KiroDuration, FirstTokenLatency, token counts, and RetryCount from request context."""
-    if ctx.kiro_request_start:
-        metrics.record_duration("KiroDuration", ctx.kiro_request_start, dims)
-    if ctx.first_token_time and ctx.kiro_request_start:
-        ttft_ms = (ctx.first_token_time - ctx.kiro_request_start) * 1000
-        metrics.put("FirstTokenLatency", ttft_ms, "Milliseconds", dims)
-    if ctx.input_tokens > 0:
-        metrics.record_count("InputTokens", ctx.input_tokens, dims)
-    if ctx.output_tokens > 0:
-        metrics.record_count("OutputTokens", ctx.output_tokens, dims)
-    retry_count = getattr(http_client, "retry_count", 0) or 0
-    if isinstance(retry_count, int) and retry_count > 0:
-        metrics.record_count("RetryCount", retry_count, dims)
+# --- Router ---
+router = APIRouter(tags=["Anthropic API"])
 
 
 @router.post("/v1/messages", dependencies=[Depends(verify_anthropic_api_key)])
@@ -430,7 +418,7 @@ async def messages(
                     else:
                         logger.info(f"HTTP 200 - POST /v1/messages (streaming) - completed")
                     # Emit Kiro-specific metrics
-                    _emit_kiro_metrics(metrics_ctx, http_client, dims)
+                    emit_kiro_metrics(metrics_ctx, getattr(http_client, "retry_count", 0) or 0, dims)
 
                     if debug_logger:
                         if streaming_error:
@@ -463,7 +451,7 @@ async def messages(
             # Emit metrics for non-streaming success
             metrics.record_count("RequestCount", 1, {**dims, "status_code": "200"})
             metrics.record_duration("Duration", request_start, dims)
-            _emit_kiro_metrics(metrics_ctx, http_client, dims)
+            emit_kiro_metrics(metrics_ctx, getattr(http_client, "retry_count", 0) or 0, dims)
 
             logger.info(f"HTTP 200 - POST /v1/messages (non-streaming) - completed")
             

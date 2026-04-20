@@ -340,6 +340,7 @@ async def stream_kiro_to_openai_internal(
         if metrics_ctx:
             metrics_ctx.input_tokens = prompt_tokens
             metrics_ctx.output_tokens = completion_tokens
+            metrics_ctx.kiro_request_end = time.time()
 
         yield f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
@@ -422,7 +423,8 @@ async def stream_with_first_token_retry(
     max_retries: int = FIRST_TOKEN_MAX_RETRIES,
     first_token_timeout: float = FIRST_TOKEN_TIMEOUT,
     request_messages: Optional[list] = None,
-    request_tools: Optional[list] = None
+    request_tools: Optional[list] = None,
+    metrics_ctx: Optional[RequestMetricsContext] = None,
 ) -> AsyncGenerator[str, None]:
     """
     Streaming with automatic retry on first token timeout.
@@ -482,7 +484,8 @@ async def stream_with_first_token_retry(
             auth_manager,
             first_token_timeout=first_token_timeout,
             request_messages=request_messages,
-            request_tools=request_tools
+            request_tools=request_tools,
+            metrics_ctx=metrics_ctx,
         ):
             yield chunk
     

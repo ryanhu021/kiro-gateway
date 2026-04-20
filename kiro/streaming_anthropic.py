@@ -473,8 +473,7 @@ async def stream_kiro_to_anthropic(
         if metrics_ctx:
             metrics_ctx.input_tokens = input_tokens
             metrics_ctx.output_tokens = output_tokens
-
-        # Send message_delta with stop_reason and usage
+            metrics_ctx.kiro_request_end = time.time()
         yield format_sse_event("message_delta", {
             "type": "message_delta",
             "delta": {
@@ -639,6 +638,7 @@ async def collect_anthropic_response(
     if metrics_ctx:
         metrics_ctx.input_tokens = input_tokens
         metrics_ctx.output_tokens = output_tokens
+        metrics_ctx.kiro_request_end = time.time()
 
     logger.debug(
         f"[Anthropic Non-Streaming] Completed: "
@@ -669,7 +669,8 @@ async def stream_with_first_token_retry_anthropic(
     max_retries: int = FIRST_TOKEN_MAX_RETRIES,
     first_token_timeout: float = FIRST_TOKEN_TIMEOUT,
     request_messages: Optional[list] = None,
-    request_tools: Optional[list] = None
+    request_tools: Optional[list] = None,
+    metrics_ctx: Optional[RequestMetricsContext] = None,
 ) -> AsyncGenerator[str, None]:
     """
     Streaming with automatic retry on first token timeout for Anthropic API.
@@ -724,7 +725,8 @@ async def stream_with_first_token_retry_anthropic(
             model_cache,
             auth_manager,
             first_token_timeout=first_token_timeout,
-            request_messages=request_messages
+            request_messages=request_messages,
+            metrics_ctx=metrics_ctx,
         ):
             yield chunk
     

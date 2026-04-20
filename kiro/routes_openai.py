@@ -51,7 +51,7 @@ from kiro.converters_openai import build_kiro_payload
 from kiro.streaming_openai import stream_kiro_to_openai, collect_stream_response, stream_with_first_token_retry
 from kiro.http_client import KiroHttpClient
 from kiro.utils import generate_conversation_id
-from kiro.metrics import metrics, RequestMetricsContext
+from kiro.metrics import metrics, RequestMetricsContext, emit_kiro_metrics
 
 # Import debug_logger
 try:
@@ -89,20 +89,8 @@ async def verify_api_key(auth_header: str = Security(api_key_header)) -> bool:
 router = APIRouter()
 
 
-def _emit_kiro_metrics(ctx: RequestMetricsContext, http_client: KiroHttpClient, dims: dict) -> None:
-    """Emit KiroDuration, FirstTokenLatency, token counts, and RetryCount from request context."""
-    if ctx.kiro_request_start:
-        metrics.record_duration("KiroDuration", ctx.kiro_request_start, dims)
-    if ctx.first_token_time and ctx.kiro_request_start:
-        ttft_ms = (ctx.first_token_time - ctx.kiro_request_start) * 1000
-        metrics.put("FirstTokenLatency", ttft_ms, "Milliseconds", dims)
-    if ctx.input_tokens > 0:
-        metrics.record_count("InputTokens", ctx.input_tokens, dims)
-    if ctx.output_tokens > 0:
-        metrics.record_count("OutputTokens", ctx.output_tokens, dims)
-    retry_count = getattr(http_client, "retry_count", 0) or 0
-    if isinstance(retry_count, int) and retry_count > 0:
-        metrics.record_count("RetryCount", retry_count, dims)
+# --- Router ---
+router = APIRouter()
 
 
 @router.get("/")
@@ -407,7 +395,7 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                     else:
                         logger.info(f"HTTP 200 - POST /v1/chat/completions (streaming) - completed")
                     # Emit Kiro-specific metrics
-                    _emit_kiro_metrics(metrics_ctx, http_client, dims)
+                    emit_kiro_metrics(metrics_ctx, getattr(http_client, "retry_count", 0) or 0, dims)
                     # Write debug logs AFTER streaming completes
                     if debug_logger:
                         if streaming_error:
@@ -436,7 +424,7 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
             # Emit metrics for non-streaming success
             metrics.record_count("RequestCount", 1, {**dims, "status_code": "200"})
             metrics.record_duration("Duration", request_start, dims)
-            _emit_kiro_metrics(metrics_ctx, http_client, dims)
+            emit_kiro_metrics(metrics_ctx, getattr(http_client, "retry_count", 0) or 0, dims)
 
             # Log access log for non-streaming success
             logger.info(f"HTTP 200 - POST /v1/chat/completions (non-streaming) - completed")
