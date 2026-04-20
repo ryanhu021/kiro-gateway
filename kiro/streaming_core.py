@@ -31,6 +31,7 @@ to convert Kiro events to their respective SSE formats.
 """
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Awaitable, Dict, List, Optional, Tuple
 
@@ -45,6 +46,7 @@ from kiro.config import (
     FAKE_REASONING_HANDLING,
 )
 from kiro.thinking_parser import ThinkingParser
+from kiro.metrics import RequestMetricsContext
 
 if TYPE_CHECKING:
     from kiro.cache import ModelInfoCache
@@ -118,7 +120,8 @@ class FirstTokenTimeoutError(Exception):
 async def parse_kiro_stream(
     response: httpx.Response,
     first_token_timeout: float = FIRST_TOKEN_TIMEOUT,
-    enable_thinking_parser: bool = True
+    enable_thinking_parser: bool = True,
+    metrics_ctx: Optional[RequestMetricsContext] = None,
 ) -> AsyncGenerator[KiroEvent, None]:
     """
     Parses Kiro SSE stream and yields unified events.
@@ -173,14 +176,19 @@ async def parse_kiro_stream(
         async for event in _process_chunk(parser, first_byte_chunk, thinking_parser):
             if event.type == "content" or event.type == "thinking":
                 first_token_received = True
+                if metrics_ctx and metrics_ctx.first_token_time is None:
+                    metrics_ctx.first_token_time = time.time()
             yield event
         
         # Continue reading remaining chunks
         async for chunk in byte_iterator:
             if debug_logger:
                 debug_logger.log_raw_chunk(chunk)
-            
+
             async for event in _process_chunk(parser, chunk, thinking_parser):
+                if metrics_ctx and metrics_ctx.first_token_time is None:
+                    if event.type == "content" or event.type == "thinking":
+                        metrics_ctx.first_token_time = time.time()
                 yield event
         
         # Finalize thinking parser and yield any remaining content
@@ -289,7 +297,8 @@ async def _process_chunk(
 async def collect_stream_to_result(
     response: httpx.Response,
     first_token_timeout: float = FIRST_TOKEN_TIMEOUT,
-    enable_thinking_parser: bool = True
+    enable_thinking_parser: bool = True,
+    metrics_ctx: Optional[RequestMetricsContext] = None,
 ) -> StreamResult:
     """
     Collects full response from Kiro stream.
@@ -308,7 +317,7 @@ async def collect_stream_to_result(
     result = StreamResult()
     full_content_for_bracket_tools = ""
     
-    async for event in parse_kiro_stream(response, first_token_timeout, enable_thinking_parser):
+    async for event in parse_kiro_stream(response, first_token_timeout, enable_thinking_parser, metrics_ctx):
         if event.type == "content" and event.content:
             result.content += event.content
             full_content_for_bracket_tools += event.content

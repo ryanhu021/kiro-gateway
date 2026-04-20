@@ -26,6 +26,7 @@ Reference: https://docs.anthropic.com/en/api/messages
 """
 
 import json
+import time
 from typing import Optional
 
 import httpx
@@ -51,6 +52,7 @@ from kiro.streaming_anthropic import (
 from kiro.http_client import KiroHttpClient
 from kiro.utils import generate_conversation_id
 from kiro.tokenizer import count_tools_tokens
+from kiro.metrics import metrics, RequestMetricsContext, emit_kiro_metrics
 
 # Import debug_logger
 try:
@@ -112,6 +114,10 @@ async def verify_anthropic_api_key(
 router = APIRouter(tags=["Anthropic API"])
 
 
+# --- Router ---
+router = APIRouter(tags=["Anthropic API"])
+
+
 @router.post("/v1/messages", dependencies=[Depends(verify_anthropic_api_key)])
 async def messages(
     request: Request,
@@ -142,7 +148,10 @@ async def messages(
         HTTPException: On validation or API errors
     """
     logger.info(f"Request to /v1/messages (model={request_data.model}, stream={request_data.stream})")
-    
+
+    request_start = time.time()
+    dims = {"api_format": "anthropic", "model": request_data.model}
+
     if anthropic_version:
         logger.debug(f"Anthropic-Version header: {anthropic_version}")
     
@@ -297,7 +306,9 @@ async def messages(
         # Non-streaming mode: shared client for efficient connection reuse
         shared_client = request.app.state.http_client
         http_client = KiroHttpClient(auth_manager, shared_client=shared_client)
-    
+
+    metrics_ctx = RequestMetricsContext()
+
     # Prepare data for token counting
     # Convert Pydantic models to dicts for tokenizer
     messages_for_tokenizer = [msg.model_dump() for msg in request_data.messages]
@@ -307,6 +318,7 @@ async def messages(
         # Make request to Kiro API (for both streaming and non-streaming modes)
         # Important: we wait for Kiro response BEFORE returning StreamingResponse,
         # so that we can return proper HTTP error codes if Kiro fails
+        metrics_ctx.kiro_request_start = time.time()
         response = await http_client.request_with_retry(
             "POST",
             url,
@@ -340,7 +352,14 @@ async def messages(
             logger.warning(
                 f"HTTP {response.status_code} - POST /v1/messages - {error_message[:100]}"
             )
-            
+
+            # Emit metrics for upstream error
+            metrics.record_count("RequestCount", 1, {**dims, "status_code": str(response.status_code)})
+            metrics.record_count("ErrorCount", 1, {**dims, "error_type": "kiro_api_error"})
+            metrics.record_duration("Duration", request_start, dims)
+            if http_client.retry_count > 0:
+                metrics.record_count("RetryCount", http_client.retry_count, dims)
+
             # Flush debug logs on error
             if debug_logger:
                 debug_logger.flush_on_error(response.status_code, error_message)
@@ -368,7 +387,8 @@ async def messages(
                         request_data.model,
                         model_cache,
                         auth_manager,
-                        request_messages=messages_for_tokenizer
+                        request_messages=messages_for_tokenizer,
+                        metrics_ctx=metrics_ctx,
                     ):
                         yield chunk
                 except GeneratorExit:
@@ -384,15 +404,22 @@ async def messages(
                         pass
                 finally:
                     await http_client.close()
+                    # Emit metrics
+                    status = "500" if streaming_error else "200"
+                    metrics.record_count("RequestCount", 1, {**dims, "status_code": status})
+                    metrics.record_duration("Duration", request_start, dims)
                     if streaming_error:
                         error_type = type(streaming_error).__name__
+                        metrics.record_count("ErrorCount", 1, {**dims, "error_type": error_type})
                         error_msg = str(streaming_error) if str(streaming_error) else "(empty message)"
                         logger.error(f"HTTP 500 - POST /v1/messages (streaming) - [{error_type}] {error_msg[:100]}")
                     elif client_disconnected:
                         logger.info(f"HTTP 200 - POST /v1/messages (streaming) - client disconnected")
                     else:
                         logger.info(f"HTTP 200 - POST /v1/messages (streaming) - completed")
-                    
+                    # Emit Kiro-specific metrics
+                    emit_kiro_metrics(metrics_ctx, getattr(http_client, "retry_count", 0) or 0, dims)
+
                     if debug_logger:
                         if streaming_error:
                             debug_logger.flush_on_error(500, str(streaming_error))
@@ -415,11 +442,17 @@ async def messages(
                 request_data.model,
                 model_cache,
                 auth_manager,
-                request_messages=messages_for_tokenizer
+                request_messages=messages_for_tokenizer,
+                metrics_ctx=metrics_ctx,
             )
-            
+
             await http_client.close()
-            
+
+            # Emit metrics for non-streaming success
+            metrics.record_count("RequestCount", 1, {**dims, "status_code": "200"})
+            metrics.record_duration("Duration", request_start, dims)
+            emit_kiro_metrics(metrics_ctx, getattr(http_client, "retry_count", 0) or 0, dims)
+
             logger.info(f"HTTP 200 - POST /v1/messages (non-streaming) - completed")
             
             if debug_logger:
@@ -429,17 +462,23 @@ async def messages(
     
     except HTTPException as e:
         await http_client.close()
+        metrics.record_count("RequestCount", 1, {**dims, "status_code": str(e.status_code)})
+        metrics.record_count("ErrorCount", 1, {**dims, "error_type": "http_exception"})
+        metrics.record_duration("Duration", request_start, dims)
         logger.error(f"HTTP {e.status_code} - POST /v1/messages - {e.detail}")
         if debug_logger:
             debug_logger.flush_on_error(e.status_code, str(e.detail))
         raise
     except Exception as e:
         await http_client.close()
+        metrics.record_count("RequestCount", 1, {**dims, "status_code": "500"})
+        metrics.record_count("ErrorCount", 1, {**dims, "error_type": type(e).__name__})
+        metrics.record_duration("Duration", request_start, dims)
         logger.error(f"Internal error: {e}", exc_info=True)
         logger.error(f"HTTP 500 - POST /v1/messages - {str(e)[:100]}")
         if debug_logger:
             debug_logger.flush_on_error(500, str(e))
-        
+
         return JSONResponse(
             status_code=500,
             content={

@@ -53,6 +53,7 @@ from kiro.streaming_core import (
     calculate_tokens_from_context_usage,
     stream_with_first_token_retry as stream_with_first_token_retry_core,
 )
+from kiro.metrics import RequestMetricsContext
 
 if TYPE_CHECKING:
     from kiro.auth import KiroAuthManager
@@ -78,7 +79,8 @@ async def stream_kiro_to_openai_internal(
     first_token_timeout: float = FIRST_TOKEN_TIMEOUT,
     request_messages: Optional[list] = None,
     request_tools: Optional[list] = None,
-    conversation_id: Optional[str] = None
+    conversation_id: Optional[str] = None,
+    metrics_ctx: Optional[RequestMetricsContext] = None,
 ) -> AsyncGenerator[str, None]:
     """
     Internal generator for converting Kiro stream to OpenAI format.
@@ -129,7 +131,7 @@ async def stream_kiro_to_openai_internal(
     try:
         # Use streaming_core.parse_kiro_stream for unified event parsing
         # This handles AWS SSE parsing, first token timeout, and thinking parser
-        async for event in parse_kiro_stream(response, first_token_timeout):
+        async for event in parse_kiro_stream(response, first_token_timeout, metrics_ctx=metrics_ctx):
             if event.type == "content" and event.content:
                 # Accumulate content for bracket tool call detection
                 full_content += event.content
@@ -333,7 +335,13 @@ async def stream_kiro_to_openai_internal(
             f"completion_tokens={completion_tokens} (tiktoken), "
             f"total_tokens={total_tokens} ({total_source})"
         )
-        
+
+        # Populate metrics context with token counts
+        if metrics_ctx:
+            metrics_ctx.input_tokens = prompt_tokens
+            metrics_ctx.output_tokens = completion_tokens
+            metrics_ctx.kiro_request_end = time.time()
+
         yield f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
         
@@ -375,14 +383,15 @@ async def stream_kiro_to_openai(
     model_cache: "ModelInfoCache",
     auth_manager: "KiroAuthManager",
     request_messages: Optional[list] = None,
-    request_tools: Optional[list] = None
+    request_tools: Optional[list] = None,
+    metrics_ctx: Optional[RequestMetricsContext] = None,
 ) -> AsyncGenerator[str, None]:
     """
     Generator for converting Kiro stream to OpenAI format.
-    
+
     This is a wrapper over stream_kiro_to_openai_internal that does NOT retry.
     Retry logic is implemented in stream_with_first_token_retry.
-    
+
     Args:
         client: HTTP client (for connection management)
         response: HTTP response with data stream
@@ -391,14 +400,16 @@ async def stream_kiro_to_openai(
         auth_manager: Authentication manager
         request_messages: Original request messages (for fallback token counting)
         request_tools: Original request tools (for fallback token counting)
-    
+        metrics_ctx: Optional metrics context for timing instrumentation
+
     Yields:
         Strings in SSE format: "data: {...}\\n\\n" or "data: [DONE]\\n\\n"
     """
     async for chunk in stream_kiro_to_openai_internal(
         client, response, model, model_cache, auth_manager,
         request_messages=request_messages,
-        request_tools=request_tools
+        request_tools=request_tools,
+        metrics_ctx=metrics_ctx,
     ):
         yield chunk
 
@@ -412,7 +423,8 @@ async def stream_with_first_token_retry(
     max_retries: int = FIRST_TOKEN_MAX_RETRIES,
     first_token_timeout: float = FIRST_TOKEN_TIMEOUT,
     request_messages: Optional[list] = None,
-    request_tools: Optional[list] = None
+    request_tools: Optional[list] = None,
+    metrics_ctx: Optional[RequestMetricsContext] = None,
 ) -> AsyncGenerator[str, None]:
     """
     Streaming with automatic retry on first token timeout.
@@ -472,7 +484,8 @@ async def stream_with_first_token_retry(
             auth_manager,
             first_token_timeout=first_token_timeout,
             request_messages=request_messages,
-            request_tools=request_tools
+            request_tools=request_tools,
+            metrics_ctx=metrics_ctx,
         ):
             yield chunk
     
@@ -494,7 +507,8 @@ async def collect_stream_response(
     model_cache: "ModelInfoCache",
     auth_manager: "KiroAuthManager",
     request_messages: Optional[list] = None,
-    request_tools: Optional[list] = None
+    request_tools: Optional[list] = None,
+    metrics_ctx: Optional[RequestMetricsContext] = None,
 ) -> dict:
     """
     Collect full response from streaming stream.
@@ -527,7 +541,8 @@ async def collect_stream_response(
         model_cache,
         auth_manager,
         request_messages=request_messages,
-        request_tools=request_tools
+        request_tools=request_tools,
+        metrics_ctx=metrics_ctx,
     ):
         if not chunk_str.startswith("data:"):
             continue
