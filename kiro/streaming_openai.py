@@ -326,49 +326,6 @@ async def stream_kiro_to_openai_internal(
         
         # Send tool calls if present
         if all_tool_calls:
-            # Intercept web_search tool calls (Path B - MCP emulation for bracket-style)
-            from kiro.config import WEB_SEARCH_ENABLED
-            if WEB_SEARCH_ENABLED:
-                remaining_tool_calls = []
-                for tc in all_tool_calls:
-                    func = tc.get("function") or {}
-                    tc_name = func.get("name") or tc.get("name", "")
-                    if tc_name == "web_search":
-                        from kiro.mcp_tools import call_kiro_mcp_api, generate_search_summary
-                        logger.info("Intercepted web_search tool call (Path B - bracket-style)")
-                        tool_input = func.get("arguments", {}) or tc.get("input", {})
-                        if isinstance(tool_input, str):
-                            try:
-                                tool_input = json.loads(tool_input)
-                            except json.JSONDecodeError:
-                                tool_input = {}
-                        query = tool_input.get("query", "")
-                        if query:
-                            mcp_tool_use_id, results = await call_kiro_mcp_api(query, auth_manager)
-                            if results is not None:
-                                summary = generate_search_summary(query, results)
-                                chunk_size = 100
-                                for i in range(0, len(summary), chunk_size):
-                                    content_chunk = summary[i:i + chunk_size]
-                                    delta = {"content": content_chunk}
-                                    if first_chunk:
-                                        delta["role"] = "assistant"
-                                        first_chunk = False
-                                    openai_chunk = {
-                                        "id": completion_id,
-                                        "object": "chat.completion.chunk",
-                                        "created": created_time,
-                                        "model": model,
-                                        "choices": [{"index": 0, "delta": delta, "finish_reason": None}]
-                                    }
-                                    yield f"data: {json.dumps(openai_chunk, ensure_ascii=False)}\n\n"
-                                full_content += summary
-                                continue
-                        remaining_tool_calls.append(tc)
-                    else:
-                        remaining_tool_calls.append(tc)
-                all_tool_calls = remaining_tool_calls
-
             logger.debug(f"Processing {len(all_tool_calls)} tool calls for streaming response")
             
             # Add required index field to each tool_call
