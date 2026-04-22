@@ -553,13 +553,13 @@ async def stream_kiro_to_anthropic(
                 tool_id = tc.get("id") or f"toolu_{uuid.uuid4().hex[:24]}"
                 tool_name = tc.get("function", {}).get("name", "")
                 tool_input = tc.get("function", {}).get("arguments", {})
-                
+
                 if isinstance(tool_input, str):
                     try:
                         tool_input = json.loads(tool_input)
                     except json.JSONDecodeError:
                         tool_input = {}
-                
+
                 yield format_sse_event("content_block_start", {
                     "type": "content_block_start",
                     "index": current_block_index,
